@@ -1,1 +1,1 @@
-# snippet-cursor
+# snipedit
