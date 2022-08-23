@@ -27,7 +27,7 @@ var (
 func main() {
 	err := run(context.Background(), os.Args[1:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 }
@@ -51,9 +51,13 @@ func run(ctx context.Context, args []string) error {
 
 	if len(snippet.IDs()) > 0 {
 		p := tea.NewProgram(initialModel(snippet), tea.WithOutput(os.Stderr))
-		err = p.Start()
+		m, err := p.StartReturningModel()
 		if err != nil {
 			return err
+		}
+
+		if m.(model).cancel {
+			return nil
 		}
 	}
 
@@ -149,6 +153,7 @@ type tickMsg struct{}
 
 type model struct {
 	focusIndex int
+	cancel     bool
 	quitting   bool
 	inputs     []textinput.Model
 	snippet    *Snippet
@@ -183,6 +188,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
+			m.cancel = true
 			m.quitting = true
 			return m, tea.Quit
 

@@ -1,25 +1,24 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	yaml "gopkg.in/yaml.v3"
 
 	_ "github.com/hinshun/snipedit/tui"
 )
 
 const listHeight = 14
 
-var (
-	quitTextStyle = lipgloss.NewStyle().Margin(1, 0, 2, 4)
-)
-
 type model struct {
 	list     list.Model
-	choice   *string
+	choice   string
 	quitting bool
 }
 
@@ -40,9 +39,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "enter":
-			i, ok := m.list.SelectedItem().(item)
+			i, ok := m.list.SelectedItem().(Item)
 			if ok {
-				*m.choice = i.desc
+				m.choice = i.Snippet
 			}
 			m.quitting = true
 			return m, tea.Quit
@@ -61,39 +60,97 @@ func (m model) View() string {
 	return "\n" + m.list.View()
 }
 
-type item struct {
-	title, desc string
+type Config struct {
+	Items    []Item
+	Includes []string
 }
 
-func (i item) Title() string       { return i.title }
-func (i item) Description() string { return i.desc }
-func (i item) FilterValue() string { return i.title }
+type Item struct {
+	Name    string
+	Snippet string
+}
+
+func (i Item) Title() string       { return i.Name }
+func (i Item) Description() string { return i.Snippet }
+func (i Item) FilterValue() string { return i.Name }
 
 func main() {
 	err := run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "err: %s\n", err)
+		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
-	items := []list.Item{
-		item{"Remove a single git commit from history and its changes", "git rebase --onto %commit%^ %commit%"},
+	var items []list.Item
+
+	rootCfg := "snipsearch.yaml"
+	// rootCfg := fmt.Sprintf("%s/.config/snipsearch/snipsearch.yaml", os.Getenv("HOME"))
+	_, err := os.Stat(rootCfg)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("No snippet config defined: %v", err)
+		}
+		return err
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, listHeight)
+	visited := make(map[string]struct{})
+	stack := []string{rootCfg}
+
+	for len(stack) > 0 {
+		next := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		absPath, err := filepath.Abs(next)
+		if err != nil {
+			return err
+		}
+		if _, ok := visited[absPath]; ok {
+			continue
+		}
+		visited[absPath] = struct{}{}
+
+		f, err := os.Open(absPath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		dt, err := io.ReadAll(f)
+		if err != nil {
+			return err
+		}
+
+		var cfg Config
+		err = yaml.Unmarshal(dt, &cfg)
+		if err != nil {
+			return err
+		}
+
+		for _, item := range cfg.Items {
+			items = append(items, item)
+		}
+
+		for _, include := range cfg.Includes {
+			stack = append(stack, include)
+		}
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("No snippets found!")
+	}
+
+	l := list.New(items, list.NewDefaultDelegate(), 0, 18)
 	l.Title = "Snippet Search"
 
-	var choice string
-	m := model{list: l, choice: &choice}
+	p := tea.NewProgram(model{list: l}, tea.WithOutput(os.Stderr))
 
-	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
-	err := p.Start()
+	m, err := p.StartReturningModel()
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(choice)
+	fmt.Print(m.(model).choice)
 	return nil
 }
