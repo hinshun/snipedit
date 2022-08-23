@@ -18,9 +18,8 @@
 
 # ALT-B - Paste the final snipet into the command line
 __snipedit() {
-  local cmd="./snipedit git rebase --onto %commit%^ %commit%"
   setopt pipefail no_aliases 2> /dev/null
-  eval $cmd
+  ./snipsearch | ./snipedit
   local ret=$?
   echo
   return $ret

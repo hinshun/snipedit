@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -11,6 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	_ "github.com/hinshun/snipedit/tui"
 )
 
 var (
@@ -30,15 +33,28 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	snippet, err := NewSnippet(strings.Join(args, " "))
+	var text string
+	if len(args) == 0 {
+		dt, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		text = string(dt)
+	} else {
+		text = strings.Join(args, " ")
+	}
+
+	snippet, err := NewSnippet(text)
 	if err != nil {
 		return err
 	}
 
-	p := tea.NewProgram(initialModel(snippet), tea.WithOutput(os.Stderr))
-	err = p.Start()
-	if err != nil {
-		return err
+	if len(snippet.IDs()) > 0 {
+		p := tea.NewProgram(initialModel(snippet), tea.WithOutput(os.Stderr))
+		err = p.Start()
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Print(snippet.view(false))
@@ -90,6 +106,14 @@ func NewSnippet(text string) (*Snippet, error) {
 	}, nil
 }
 
+func (s *Snippet) IDs() []string {
+	return s.sortedPos
+}
+
+func (s *Snippet) Complete() bool {
+	return len(s.sortedPos) == len(s.posText)
+}
+
 func (s *Snippet) View() string {
 	return s.view(true)
 }
@@ -125,6 +149,7 @@ type tickMsg struct{}
 
 type model struct {
 	focusIndex int
+	quitting   bool
 	inputs     []textinput.Model
 	snippet    *Snippet
 	textInput  textinput.Model
@@ -158,6 +183,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
+			m.quitting = true
 			return m, tea.Quit
 
 		// Set focus to next input
@@ -166,7 +192,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Did the user press enter while the submit button was focused?
 			// If so, exit.
-			if s == "enter" && m.focusIndex == len(m.inputs)-1 {
+			if s == "enter" && m.snippet.Complete() {
+				m.quitting = true
 				return m, tea.Quit
 			}
 
@@ -220,13 +247,22 @@ func (m *model) updateInputs(msg tea.Msg) tea.Cmd {
 	for i := range m.inputs {
 		m.inputs[i], cmds[i] = m.inputs[i].Update(msg)
 		id := m.snippet.sortedPos[i]
-		m.snippet.posText[id] = m.inputs[i].Value()
+		val := m.inputs[i].Value()
+		if val == "" {
+			delete(m.snippet.posText, id)
+		} else {
+			m.snippet.posText[id] = val
+		}
 	}
 
 	return tea.Batch(cmds...)
 }
 
 func (m model) View() string {
+	if m.quitting {
+		return ""
+	}
+
 	var b strings.Builder
 	b.WriteString(m.snippet.View() + "\n")
 
@@ -237,5 +273,5 @@ func (m model) View() string {
 		}
 	}
 
-	return b.String() + "\n"
+	return b.String()
 }

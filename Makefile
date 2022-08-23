@@ -1,4 +1,4 @@
-.PHONY: all snipedit
+.PHONY: all snipedit snipsearch
 
 export GOBIN		:= $(shell dirname $(shell which go))
 export GO		:= ${GOBIN}/go
@@ -13,11 +13,15 @@ GOPATH ?= $(HOME)/go
 
 VERSION := $(shell git describe --tags --always --dirty)
 
-all: snipedit
+all: snipedit snipsearch
 
 snipedit:
 	# VERSION: ${VERSION}
 	GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 ${GO} build ./cmd/snipedit
+
+snipsearch:
+	# VERSION: ${VERSION}
+	GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 ${GO} build ./cmd/snipsearch
 
 lint:
 	${GOFMT} -d -l .
